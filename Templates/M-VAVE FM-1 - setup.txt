@@ -1,0 +1,38 @@
+M-VAVE FM-1 EMULATOR (fm1-live) — ReMOTE 61 SL TEMPLATE
+Template file: M-VAVE FM-1.syx
+Emulator change: fm1-live-midi-panel.patch (adds MIDI control of the FM-1's panel)
+
+The emulator normally sends all MIDI into the FM-1's MIDI IN jack, which plays the firmware.
+The patch adds a panel channel: control changes on MIDI channel 16 now turn the FM-1's
+knobs and press its buttons, as the mouse does. Your keys still play the synth on their channel.
+
+WHAT EACH CONTROL DOES  (all on MIDI channel 16)
+  Encoder 1 ............ MASTER        CC 20   relative
+  Encoder 2 ............ SELECT        CC 21   relative
+  Encoder 3 ............ PRESETS       CC 22   relative
+  Encoder 4 ............ ALGORITHM     CC 23   relative
+  Encoders 5–8 ......... KNOB1–KNOB4   CC 24–27 relative
+  Right upper 1–6 ...... FX SCL ENV LFO EDIT GLO     CC 104–109
+  Right lower 1–6 ...... HOME SAVE ARP SEQ PLAY REC  CC 110–115
+  Left lower 1–2 ....... OCT- / OCT+                 CC 102–103
+  Pedals, mod wheel, pitch bend: as usual, on the keyboard's channel
+
+  The SL's own Octave buttons are fixed hardware functions a template can't reassign, so
+  OCT- and OCT+ are on Left Lower buttons 1 and 2. The SL's octave buttons still transpose
+  the notes you play into the emulator.
+
+ONE-TIME SETUP: ADD PANEL CONTROL TO THE EMULATOR
+In Terminal, in your fm1-emu folder (or clone it first:
+  git clone https://github.com/joakimeriksson/fm1-emu.git && cd fm1-emu):
+
+  git apply "/path/to/fm1-live-midi-panel.patch"
+  cargo run --release -p fm1-live -- --fw felucca
+
+When it starts it prints "MIDI panel control on channel 16 …". Options:
+  --panel-ch N   use another channel for the panel (0 turns panel control off)
+  --midi-ch 2    for M-VAVE's stock firmware, which listens to notes on channel 2;
+                 this moves your keys to channel 2 and leaves the panel on channel 16
+
+ON THE KEYBOARD
+Open "M-VAVE FM-1.syx" in SL Template Editor, press Send This Template, then Write on the
+keyboard to keep it in a slot.

@@ -1,0 +1,225 @@
+diff --git a/crates/fm1-live/src/main.rs b/crates/fm1-live/src/main.rs
+index 837642d..e5ee402 100644
+--- a/crates/fm1-live/src/main.rs
++++ b/crates/fm1-live/src/main.rs
+@@ -19,6 +19,8 @@
+ //! MIDI: every MIDI input of this computer plays the synth through its MIDI IN jack
+ //! (`--midi none` turns that off, `--midi NAME` takes the inputs whose name contains NAME);
+ //! `--midi-ch N` sends channel messages to channel N (M-VAVE's firmware listens on 2).
++//! `--panel-ch N` (default 16, 0 = off): control changes on channel N play the panel instead
++//! (knobs, MASTER and buttons; the CC numbers are in `panel_midi.rs`).
+ 
+ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+ use fm1_core::{Bus, Cpu};
+@@ -27,6 +29,7 @@ use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
+ use panel::{Ctl, ENCS, H, W};
+ 
+ mod panel;
++mod panel_midi;
+ mod panel_smk;
+ use std::collections::VecDeque;
+ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+@@ -58,6 +61,8 @@ struct Opts {
+     midi: String,
+     /// channel messages sent to this channel (1-16; 0 = as sent)
+     midi_ch: u8,
++    /// control changes on this channel play the FM-1's panel (1-16; 0 = off), see panel_midi
++    panel_ch: u8,
+ }
+ 
+ /// The firmware catalog web/firmwares.json as (id, name, version, image path): each image is
+@@ -83,7 +88,7 @@ fn catalog() -> Vec<(String, String, String, String)> {
+ fn parse() -> Option<Opts> {
+     let a: Vec<String> = std::env::args().collect();
+     let mut o = Opts { bin: "work/felucca_xip.bin".into(), entry: 0x0200_0120, mhz: 240, bench: None, shot: None,
+-                       name: "Felucca".into(), fwsc: None, syx: None, midi: "all".into(), midi_ch: 0 };
++                       name: "Felucca".into(), fwsc: None, syx: None, midi: "all".into(), midi_ch: 0, panel_ch: 16 };
+     let mut i = 1;
+     while i < a.len() {
+         match a[i].as_str() {
+@@ -113,6 +118,7 @@ fn parse() -> Option<Opts> {
+             "--syx" => o.syx = Some(a.get(i + 1)?.clone()),
+             "--midi" => o.midi = a.get(i + 1)?.clone(),
+             "--midi-ch" => o.midi_ch = a.get(i + 1)?.parse().ok().filter(|c| *c <= 16)?,
++            "--panel-ch" => o.panel_ch = a.get(i + 1)?.parse().ok().filter(|c| *c <= 16)?,
+             "--entry" => o.entry = u32::from_str_radix(a.get(i + 1)?.trim_start_matches("0x"), 16).ok()?,
+             "--mhz" => o.mhz = a.get(i + 1)?.parse().ok()?,
+             "--bench" => o.bench = Some(a.get(i + 1)?.parse().ok()?),
+@@ -570,9 +576,11 @@ fn button(k: Key) -> Option<u8> {
+     })
+ }
+ 
+-/// Connect the MIDI inputs `--midi` asks for: their bytes go to the MIDI IN jack. The
+-/// connections live as long as the returned value.
+-fn midi_inputs(o: &Opts, tx: &mpsc::Sender<Action>) -> Vec<midir::MidiInputConnection<()>> {
++/// Connect the MIDI inputs `--midi` asks for: their bytes go to the MIDI IN jack, except the
++/// control changes on `panel_ch` that play the panel (sent to `panel_tx`). The connections
++/// live as long as the returned value.
++fn midi_inputs(o: &Opts, tx: &mpsc::Sender<Action>, panel_ch: u8, panel_tx: &mpsc::Sender<panel_midi::PanelMsg>)
++    -> Vec<midir::MidiInputConnection<()>> {
+     let mut conns = Vec::new();
+     if o.midi == "none" {
+         return conns;
+@@ -591,8 +599,12 @@ fn midi_inputs(o: &Opts, tx: &mpsc::Sender<Action>) -> Vec<midir::MidiInputConne
+         }
+         let Ok(mut input) = midir::MidiInput::new("fm1-live") else { continue };
+         input.ignore(midir::Ignore::None);
+-        let (tx, ch) = (tx.clone(), o.midi_ch);
++        let (tx, ch, ptx) = (tx.clone(), o.midi_ch, panel_tx.clone());
+         let got = input.connect(&port, "fm1-live in", move |_, msg, _| {
++            if let Some(p) = panel_midi::decode(msg, panel_ch) {
++                let _ = ptx.send(p);
++                return;
++            }
+             for (i, &b) in msg.iter().enumerate() {
+                 let b = if i == 0 && ch != 0 && (0x80..0xf0).contains(&b) { (b & 0xf0) | (ch - 1) } else { b };
+                 let _ = tx.send(Action::Midi { b });
+@@ -617,7 +629,7 @@ const DRAG_PER_CLICK: f32 = 12.0;
+ 
+ fn main() {
+     let Some(o) = parse() else {
+-        eprintln!("usage: fm1-live [--fw ID | --fw list | --bin work/felucca_xip.bin] [--entry 0x02000120] [--mhz 240] [--bench MS] [--midi all|none|NAME] [--midi-ch N]");
++        eprintln!("usage: fm1-live [--fw ID | --fw list | --bin work/felucca_xip.bin] [--entry 0x02000120] [--mhz 240] [--bench MS] [--midi all|none|NAME] [--midi-ch N] [--panel-ch N]");
+         std::process::exit(2);
+     };
+     if let Some(ms) = o.shot {
+@@ -654,7 +666,13 @@ fn main() {
+     let status = Arc::new(Mutex::new(String::from("booting")));
+     let quit = Arc::new(AtomicBool::new(false));
+     let (tx, rx) = mpsc::channel::<Action>();
+-    let _midi = midi_inputs(&o, &tx);
++    // MIDI panel control drives the FM-1's panel window (the SMK-37's has its own controls)
++    let panel_ch = if board == fm1_soc::Board::Smk37 { 0 } else { o.panel_ch };
++    let (panel_tx, panel_rx) = mpsc::channel::<panel_midi::PanelMsg>();
++    let _midi = midi_inputs(&o, &tx, panel_ch, &panel_tx);
++    if panel_ch != 0 {
++        eprintln!("MIDI panel control on channel {panel_ch}: CC 20 MASTER, 21-27 SELECT..KNOB4 (relative), 102-115 OCT-..REC");
++    }
+ 
+     let audio_ok = _stream.is_some();
+     let emu = {
+@@ -758,6 +776,7 @@ fn main() {
+     let mut was_pressed = false;
+     let (mut last_y, mut drag_acc) = (0f32, 0f32);
+     let mut last_title = Instant::now();
++    let mut midi_held = [false; 14];
+     eprintln!("mouse: click/drag the keys, click buttons, drag or scroll the knobs (MASTER = volume)");
+     eprintln!("keys: A W S E D F T G Y H U J K O L P ; ' = C4..F5, Z/X OCT, Space PLAY, R REC, 1..0 buttons, arrows and , . for SELECT/PRESETS/ALGORITHM; Esc quits");
+ 
+@@ -834,8 +853,24 @@ fn main() {
+         }
+         was_pressed = pressed;
+ 
+-        // ---- held keys and buttons: computer keyboard + mouse
++        // ---- MIDI panel control (--panel-ch)
++        while let Ok(p) = panel_rx.try_recv() {
++            match p {
++                panel_midi::PanelMsg::Master(clicks) => {
++                    pot = (pot as i32 + clicks * panel_midi::POT_STEP).clamp(0, 1023) as u16;
++                    turning[7] = 10;
++                    let _ = tx.send(Action::Adc { ch: 4, value: pot });
++                }
++                panel_midi::PanelMsg::Enc(i, clicks) => turn(i, clicks, &mut enc_clicks, &mut turning),
++                panel_midi::PanelMsg::Btn(id, on) => midi_held[id as usize] = on,
++            }
++        }
++
++        // ---- held keys and buttons: computer keyboard + mouse + MIDI panel control
+         let mut want = [false; 41];
++        for (id, &on) in midi_held.iter().enumerate() {
++            want[id] |= on;
++        }
+         for k in win.get_keys() {
+             if let Some(id) = piano(k).or_else(|| button(k)) {
+                 want[id as usize] = true;
+diff --git a/crates/fm1-live/src/panel_midi.rs b/crates/fm1-live/src/panel_midi.rs
+new file mode 100644
+index 0000000..34fc1cd
+--- /dev/null
++++ b/crates/fm1-live/src/panel_midi.rs
+@@ -0,0 +1,85 @@
++//! MIDI control of the FM-1's front panel (`--panel-ch N`, default 16).
++//!
++//! Control changes on the panel channel turn the knobs and press the buttons, as the mouse
++//! does, instead of going to the firmware's MIDI IN. Every other message, and every message
++//! on other channels, plays the firmware as before.
++//!
++//! | CC        | Control                                                          |
++//! |-----------|------------------------------------------------------------------|
++//! | 20        | MASTER pot, relative                                             |
++//! | 21..=27   | SELECT, PRESETS, ALGORITHM, KNOB1..KNOB4, relative               |
++//! | 102..=115 | buttons OCT- OCT+ FX SCL ENV LFO EDIT GLO HOME SAVE ARP SEQ PLAY REC |
++//!
++//! Relative values: 64 + n turns n clicks clockwise, 64 - n turns n clicks anticlockwise
++//! (a Novation ReMOTE SL encoder in REL1 mode sends 65 / 63, in REL2 64 ± n).
++//! Buttons: a value of 64 or more presses, below 64 releases.
++
++/// CC number of the MASTER pot.
++pub const CC_MASTER: u8 = 20;
++/// First encoder CC; the encoders follow in `panel::ENCS` order.
++pub const CC_ENC0: u8 = 21;
++/// First button CC; button matrix ids 0..=13 follow.
++pub const CC_BTN0: u8 = 102;
++/// Pot steps (of 0..=1023) per MASTER click: 64 clicks sweep the whole range.
++pub const POT_STEP: i32 = 16;
++
++/// One panel action decoded from a control change.
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub enum PanelMsg {
++    /// Turn the MASTER pot by this many clicks.
++    Master(i32),
++    /// Turn an encoder (index into `panel::ENCS`) by this many clicks.
++    Enc(usize, i32),
++    /// Press (true) or release (false) a button (matrix id 0..=13).
++    Btn(u8, bool),
++}
++
++/// The panel action for a MIDI message, if it is a mapped control change on `panel_ch`
++/// (1..=16; 0 turns panel control off).
++pub fn decode(msg: &[u8], panel_ch: u8) -> Option<PanelMsg> {
++    if panel_ch == 0 || msg.len() < 3 || msg[0] != 0xb0 | (panel_ch - 1) {
++        return None;
++    }
++    let (cc, v) = (msg[1], msg[2] as i32);
++    let rel = v - 64;
++    match cc {
++        CC_MASTER => Some(PanelMsg::Master(rel)),
++        c if (CC_ENC0..CC_ENC0 + 7).contains(&c) => Some(PanelMsg::Enc((c - CC_ENC0) as usize, rel)),
++        c if (CC_BTN0..CC_BTN0 + 14).contains(&c) => Some(PanelMsg::Btn(c - CC_BTN0, v >= 64)),
++        _ => None,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn rel1_encoders_turn_one_click() {
++        assert_eq!(decode(&[0xbf, 21, 65], 16), Some(PanelMsg::Enc(0, 1)));
++        assert_eq!(decode(&[0xbf, 27, 63], 16), Some(PanelMsg::Enc(6, -1)));
++        assert_eq!(decode(&[0xbf, 20, 65], 16), Some(PanelMsg::Master(1)));
++    }
++
++    #[test]
++    fn rel2_encoders_turn_several_clicks() {
++        assert_eq!(decode(&[0xbf, 22, 67], 16), Some(PanelMsg::Enc(1, 3)));
++        assert_eq!(decode(&[0xbf, 22, 60], 16), Some(PanelMsg::Enc(1, -4)));
++    }
++
++    #[test]
++    fn buttons_press_and_release() {
++        assert_eq!(decode(&[0xbf, 102, 127], 16), Some(PanelMsg::Btn(0, true)));
++        assert_eq!(decode(&[0xbf, 115, 0], 16), Some(PanelMsg::Btn(13, false)));
++    }
++
++    #[test]
++    fn other_messages_go_to_the_firmware() {
++        assert_eq!(decode(&[0xb0, 21, 65], 16), None);     // another channel
++        assert_eq!(decode(&[0x9f, 60, 100], 16), None);    // a note on the panel channel
++        assert_eq!(decode(&[0xbf, 1, 64], 16), None);      // an unmapped CC
++        assert_eq!(decode(&[0xbf, 116, 127], 16), None);   // past the last button
++        assert_eq!(decode(&[0xbf, 21, 65], 0), None);      // panel control off
++        assert_eq!(decode(&[0xb3, 21, 65], 4), Some(PanelMsg::Enc(0, 1)));
++    }
++}

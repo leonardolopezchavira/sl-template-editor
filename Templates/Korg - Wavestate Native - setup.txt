@@ -1,0 +1,33 @@
+KORG WAVESTATE NATIVE — ReMOTE 61 SL TEMPLATE
+Template file: Korg - Wavestate Native.syx   (all controls on MIDI channel 1)
+
+WHAT EACH CONTROL SENDS
+  Encoders 1–8 ........ CC 24–31   Performance Mod Knobs 1–8   (works as-is)
+  Touchpad X1 / Y1 .... CC 16 / 17 Vector joystick X / Y        (works as-is)
+  Sliders 1–4 ......... CC 20–23   Layer A–D volume             (needs setup)
+  Pots 1–8 (pairs) .... CC 70/71   Layer A cutoff / resonance   (needs setup)
+                        CC 72/73   Layer B cutoff / resonance
+                        CC 74/75   Layer C cutoff / resonance
+                        CC 76/77   Layer D cutoff / resonance
+  Joystick (SL) ....... Mod wheel CC 1 and Pitch bend, as usual
+
+ONE-TIME SETUP IN WAVESTATE NATIVE (standalone)
+1. Settings > MIDI: choose the ReMOTE SL as MIDI input; Global MIDI Channel = 1.
+   Make sure each layer has "Use Global MIDI Channel" on.
+2. Load the Performance you want to play.
+3. For each layer (A, B, C, D) open its Mod Inspector and add three routings with "+":
+     Source CC 20 (layer A) / 21 (B) / 22 (C) / 23 (D)  ->  Amp volume (level)
+     Source CC 70 (A) / 72 (B) / 74 (C) / 76 (D)        ->  Filter Cutoff
+     Source CC 71 (A) / 73 (B) / 75 (C) / 77 (D)        ->  Filter Resonance
+   Set each routing's Intensity to +100.
+4. CC sources add to the knob's own setting, so turn each layer's Volume, Cutoff and
+   Resonance down to the lowest value you want; the slider or pot then sweeps upward.
+5. Save the Performance. The routings are stored with it, so repeat steps 3–5 for
+   other Performances you want to control the same way.
+
+ON THE KEYBOARD
+- Open "Korg - Wavestate Native.syx" in SL Template Editor and press Send This Template,
+  then Write on the keyboard to keep it in a slot.
+
+NOT INCLUDED
+- Arpeggiator on/off per layer: wavestate native has no MIDI control for it.

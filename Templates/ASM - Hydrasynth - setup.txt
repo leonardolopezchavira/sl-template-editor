@@ -1,0 +1,40 @@
+ASM HYDRASYNTH — ReMOTE 61 SL TEMPLATES
+All controls on MIDI channel 1 (the Hydrasynth's default), sent over USB and MIDI Out 1.
+
+TWO VERSIONS — PICK THE ONE THAT MATCHES THE HYDRASYNTH'S MIDI SETTING
+The Hydrasynth receives parameters either as CCs or as NRPNs (System Setup, MIDI page:
+parameter send/receive).
+
+  ASM - Hydrasynth NRPN.syx   Set the Hydrasynth to NRPN. Everything you asked for.
+  ASM - Hydrasynth CC.syx     Set the Hydrasynth to CC. Arp Swing and Filter Morph left out:
+                              the Hydrasynth has no CC for them.
+
+LAYOUT
+  Encoders 1–4 (left) ... Arp Mode, Arp Octave, Arp Division, Arp Swing*
+  Encoders 5–8 .......... Macro 1–4
+  Pots 1–4 .............. Filter 1 Cutoff, Resonance, Drive, Morph*
+  Pots 5–8 .............. Macro 5–8
+  Pedals, mod wheel, pitch bend as usual.
+  * NRPN version only.
+
+NRPN VERSION: WHAT EACH CONTROL SENDS (from ASM's MIDI spec)
+  Arp Mode / Octave / Division / Swing   NRPN 39H 03H, data MSB 6 / 5 / 1 / 2 selects the
+                                          parameter, data LSB is the value:
+                                          Mode 0–7, Octave 1–4, Division 0–11, Swing 50–75
+  Macro 1–8                               NRPN 3FH 58H–5FH, 0–1024
+  Filter 1 Cutoff / Res / Drive / Special NRPN 40H 28H / 29H / 2BH / 2AH, 0–8192
+  ("Morph" is the Filter 1 Special knob: Morph, Vowel or Formant, depending on the filter type.)
+
+CC VERSION
+  Arp Mode CC 108, Arp Octave CC 120, Arp Division CC 106
+  Macro 1–8 CC 16–23
+  Filter 1 Cutoff CC 74, Resonance CC 71, Drive CC 50
+
+PREVIOUS / NEXT PRESET — NOT INCLUDED
+The Hydrasynth has no MIDI message for "previous" or "next" patch; it only accepts a Program
+Change to a specific patch number (with Bank Select LSB 0–4 for the bank). So Rewind and Forward
+are left unassigned in both templates.
+
+ON THE KEYBOARD
+Open the .syx in SL Template Editor, press Send This Template, then Write on the keyboard to
+keep it in a slot.
