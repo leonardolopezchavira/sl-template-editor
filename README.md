@@ -52,7 +52,7 @@ For development, use `swift run` or open `Package.swift` in Xcode.
 | `Docs/FORMAT.md` | The reverse-engineered template format, with a confidence level for each field. |
 | `Tools/make_icon.swift` | Draws the app icon (run by `build.sh`). |
 | `Tools/slcodec.py` | The Python reference codec used during reverse engineering. |
-| `Templates/` | Ready-made templates, each with setup notes: Korg wavestate native, M-VAVE FM-1 (emulator), ASM Hydrasynth (NRPN and CC versions). |
+| `Templates/` | Ready-made templates: Korg wavestate native, M-VAVE FM-1 (emulator) and ASM Hydrasynth (NRPN and CC versions), each with setup notes; plus Arturia Analog Lab, Arturia MiniFreak and a general-purpose MIDI CC Learn template. |
 | `Patches/fm1-live-midi-panel.patch` | A patch for [fm1-emu](https://github.com/joakimeriksson/fm1-emu)'s desktop app that lets MIDI control the FM-1's panel; needed by the FM-1 template. |
 
 ## Known limits
